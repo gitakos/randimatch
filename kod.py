@@ -58,10 +58,11 @@ def extract_features(text, model=None, reference_topic=None):
         "syllables_per_word": syllables_per_word,
         "vocabulary_density": vocabulary_density,
         "common_chars": common_chars,
-        "avg_vector_length": avg_vector_length,
-        "topic_similarity": topic_similarity,
+        "avg_vector_length": avg_vector_length,  # Word2Vec alapú jellemző
+        "topic_similarity": topic_similarity,  # Word2Vec alapú jellemző
         "top_words": top_words
     }
+
 
 def count_syllables(word):
     """Becsüli egy szó szótagjainak számát."""
@@ -135,22 +136,6 @@ def load_pretrained_word2vec_model(path):
     """Betölt egy előre tanított Word2Vec modellt."""
     return gensim.models.KeyedVectors.load_word2vec_format(path, binary=True)
 
-def main(folder1, folder2, model_path):
-    # Beolvasás
-    texts1 = read_texts_from_folder(folder1)
-    texts2 = read_texts_from_folder(folder2)
-
-    # Word2Vec modell betöltése
-    model = load_pretrained_word2vec_model(model_path)
-
-    # Szövegek párosítása
-    pairs = pair_texts(texts1, texts2, model)
-
-    # Eredmények kiírása
-    print("Párosítások és hasonlósági pontszámok:")
-    for name1, name2, score in pairs:
-        print(f"{name1} <--> {name2} (Hasonlóság: {score:.2f})")
-
 def pair_texts_bidirectional_unique(texts1, texts2, model):
     """Párosítja a két mappa szövegeit mindkét irányban, és megtalálja a legjobb párokat."""
     best_pairs_from_first = {}
@@ -160,10 +145,14 @@ def pair_texts_bidirectional_unique(texts1, texts2, model):
     for name1, text1 in texts1.items():
         best_match = None
         best_score = -1
-        features1 = extract_features(text1, model)
+        generated_reference_topic1 = generate_reference_topic(text1, model, top_n=10)
+        #print("Generated Reference Topic:", generated_reference_topic1)
+        features1 = extract_features(text1, model,generated_reference_topic1)
         text1_tokens = preprocess_text(text1)
         for name2, text2 in texts2.items():
-            features2 = extract_features(text2, model)
+            generated_reference_topic2 = generate_reference_topic(text2, model, top_n=10)
+            #print("Generated Reference Topic:", generated_reference_topic2)
+            features2 = extract_features(text2, model,generated_reference_topic2)
             text2_tokens = preprocess_text(text2)
             similarity = calculate_similarity(features1, features2, text1_tokens, text2_tokens, model)
             if similarity > best_score:
@@ -199,7 +188,7 @@ def pair_texts_bidirectional_unique(texts1, texts2, model):
         all_pairs.append((name1, best_match1, score1))
     
     for name2, (best_match2, score2) in best_pairs_from_second.items():
-        all_pairs.append((best_match2, name2, score2))
+        all_pairs.append((name2, best_match2, score2))
 
     return all_pairs
 
@@ -209,6 +198,36 @@ def print_all_pair_results(all_pairs):
     for name1, name2, score in all_pairs:
         print(f"{name1} <--> {name2} (Hasonlóság: {score:.2f})")
 
+def generate_reference_topic(texts, model, top_n=10):
+    """
+    Automatikusan kigenerál egy referencia-témát (kulcsszavakat) a szövegek alapján.
+    
+    :param texts: Egy szöveg (string) vagy szövegek listája/szótára.
+    :param model: Word2Vec modell.
+    :param top_n: A kiválasztott kulcsszavak száma.
+    :return: Lista a referencia-téma kulcsszavaival.
+    """
+    # Ellenőrizzük, hogy a texts string, lista vagy szótár
+    if isinstance(texts, str):
+        all_tokens = preprocess_text(texts)
+    elif isinstance(texts, dict):
+        all_tokens = []
+        for text in texts.values():
+            tokens = preprocess_text(text)
+            all_tokens.extend([token for token in tokens if token in model.key_to_index])
+    elif isinstance(texts, list):
+        all_tokens = []
+        for text in texts:
+            tokens = preprocess_text(text)
+            all_tokens.extend([token for token in tokens if token in model.key_to_index])
+    else:
+        raise ValueError("texts paraméternek stringnek, listának vagy szótárnak kell lennie.")
+
+    # Leggyakoribb szavak kiválasztása
+    word_frequencies = Counter(all_tokens)
+    most_common_words = [word for word, _ in word_frequencies.most_common(top_n)]
+
+    return most_common_words
 
 
 if __name__ == "__main__":
@@ -222,6 +241,7 @@ if __name__ == "__main__":
 
     # Word2Vec modell betöltése
     model = load_pretrained_word2vec_model(model_path)
+
 
     # Szövegek párosítása kölcsönösen a legjobb párokkal
     all_pairs = pair_texts_bidirectional_unique(texts1, texts2, model)
